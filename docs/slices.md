@@ -45,6 +45,7 @@ a user can:
 - passing a prompt and optional read-only file references to the runner
 - capturing logs
 - basic run state tracking (queued / running / completed / failed / killed)
+- explicit cleanup via `agents rm`; no implicit deletion
 
 **explicit non-goals**
 
@@ -67,7 +68,7 @@ none
 
 - multiple runs can execute concurrently
 - killing one run never affects another
-- worktrees are always cleaned up deterministically
+- worktrees are cleaned up deterministically via explicit `agents rm`
 - run completion is determined by runner process exit status
 
 ---
