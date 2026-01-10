@@ -178,7 +178,7 @@ ready_for_review predicates:
   - then: show still succeeds, but prints warning “no tmux session; transcript not captured”
 capture target:
 - the tmux session has exactly one window/pane
-- capture via `tmux capture-pane -p -S - -t <target>`
+- capture via `tmux capture-pane -p -S - -t agency:<run_id>:0.0`
 - failure to run tmux command does not fail `show`; warn only
 
 ## persistence
