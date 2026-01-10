@@ -462,19 +462,361 @@ func TestService_WriteMeta_RunDirCollision(t *testing.T) {
 	}
 }
 
-func TestService_RunSetup_NotImplemented(t *testing.T) {
+func TestService_RunSetup_Success(t *testing.T) {
+	repoRoot, dataDir, cleanup := setupTempRepo(t)
+	defer cleanup()
+
+	// Set AGENCY_DATA_DIR
+	oldDataDir := os.Getenv("AGENCY_DATA_DIR")
+	os.Setenv("AGENCY_DATA_DIR", dataDir)
+	defer os.Setenv("AGENCY_DATA_DIR", oldDataDir)
+
+	// Change to repo directory
+	oldWd, _ := os.Getwd()
+	os.Chdir(repoRoot)
+	defer os.Chdir(oldWd)
+
+	resolvedRepoRoot, _ := filepath.EvalSymlinks(repoRoot)
+
 	svc := New()
 	ctx := context.Background()
-	st := &pipeline.PipelineState{}
 
-	err := svc.RunSetup(ctx, st)
+	runID := "20260110120000-setup"
+	repoID := "abcd1234ef567890"
+
+	// Create worktree
+	st := &pipeline.PipelineState{
+		RunID:        runID,
+		Title:        "Setup Test",
+		RepoRoot:     resolvedRepoRoot,
+		RepoID:       repoID,
+		DataDir:      dataDir,
+		ParentBranch: "main",
+		Runner:       "claude",
+	}
+
+	err := svc.CreateWorktree(ctx, st)
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	st.ResolvedRunnerCmd = "claude"
+	st.SetupScript = "scripts/agency_setup.sh"
+
+	// Write meta
+	err = svc.WriteMeta(ctx, st)
+	if err != nil {
+		t.Fatalf("WriteMeta failed: %v", err)
+	}
+
+	// Create setup script in worktree that writes a sentinel file
+	scriptsDir := filepath.Join(st.WorktreePath, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatalf("failed to create scripts dir: %v", err)
+	}
+
+	setupScript := `#!/bin/bash
+set -euo pipefail
+echo "setup running"
+touch "$AGENCY_DOTAGENCY_DIR/tmp/sentinel"
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "agency_setup.sh"), []byte(setupScript), 0755); err != nil {
+		t.Fatalf("failed to write setup script: %v", err)
+	}
+
+	// Run setup
+	err = svc.RunSetup(ctx, st)
+	if err != nil {
+		t.Fatalf("RunSetup failed: %v", err)
+	}
+
+	// Verify sentinel file was created
+	sentinelPath := filepath.Join(st.WorktreePath, ".agency", "tmp", "sentinel")
+	if _, err := os.Stat(sentinelPath); os.IsNotExist(err) {
+		t.Error("sentinel file should exist after setup")
+	}
+
+	// Verify log file exists
+	logPath := filepath.Join(dataDir, "repos", repoID, "runs", runID, "logs", "setup.log")
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Error("setup.log should exist")
+	}
+
+	// Read and verify log contains expected content
+	logContent, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read setup.log: %v", err)
+	}
+	if !strings.Contains(string(logContent), "setup running") {
+		t.Error("setup.log should contain script output")
+	}
+
+	// Verify meta was updated
+	metaPath := filepath.Join(dataDir, "repos", repoID, "runs", runID, "meta.json")
+	metaContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("failed to read meta.json: %v", err)
+	}
+	if !strings.Contains(string(metaContent), `"exit_code": 0`) {
+		t.Error("meta.json should contain exit_code 0")
+	}
+	if !strings.Contains(string(metaContent), `"command"`) {
+		t.Error("meta.json should contain command field")
+	}
+}
+
+func TestService_RunSetup_ScriptFailed(t *testing.T) {
+	repoRoot, dataDir, cleanup := setupTempRepo(t)
+	defer cleanup()
+
+	// Set AGENCY_DATA_DIR
+	oldDataDir := os.Getenv("AGENCY_DATA_DIR")
+	os.Setenv("AGENCY_DATA_DIR", dataDir)
+	defer os.Setenv("AGENCY_DATA_DIR", oldDataDir)
+
+	// Change to repo directory
+	oldWd, _ := os.Getwd()
+	os.Chdir(repoRoot)
+	defer os.Chdir(oldWd)
+
+	resolvedRepoRoot, _ := filepath.EvalSymlinks(repoRoot)
+
+	svc := New()
+	ctx := context.Background()
+
+	runID := "20260110120000-fail"
+	repoID := "abcd1234ef567890"
+
+	// Create worktree
+	st := &pipeline.PipelineState{
+		RunID:        runID,
+		Title:        "Setup Fail Test",
+		RepoRoot:     resolvedRepoRoot,
+		RepoID:       repoID,
+		DataDir:      dataDir,
+		ParentBranch: "main",
+		Runner:       "claude",
+	}
+
+	err := svc.CreateWorktree(ctx, st)
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	st.ResolvedRunnerCmd = "claude"
+	st.SetupScript = "scripts/agency_setup.sh"
+
+	// Write meta
+	err = svc.WriteMeta(ctx, st)
+	if err != nil {
+		t.Fatalf("WriteMeta failed: %v", err)
+	}
+
+	// Create setup script that fails with exit code 7
+	scriptsDir := filepath.Join(st.WorktreePath, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatalf("failed to create scripts dir: %v", err)
+	}
+
+	setupScript := `#!/bin/bash
+echo "setup failing"
+exit 7
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "agency_setup.sh"), []byte(setupScript), 0755); err != nil {
+		t.Fatalf("failed to write setup script: %v", err)
+	}
+
+	// Run setup - should fail
+	err = svc.RunSetup(ctx, st)
 	if err == nil {
-		t.Fatal("expected error for not implemented")
+		t.Fatal("expected error for failed setup")
 	}
 
 	code := errors.GetCode(err)
-	if code != errors.ENotImplemented {
-		t.Errorf("error code = %q, want %q", code, errors.ENotImplemented)
+	if code != errors.EScriptFailed {
+		t.Errorf("error code = %q, want %q", code, errors.EScriptFailed)
+	}
+
+	// Verify meta was updated with failure
+	metaPath := filepath.Join(dataDir, "repos", repoID, "runs", runID, "meta.json")
+	metaContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("failed to read meta.json: %v", err)
+	}
+	if !strings.Contains(string(metaContent), `"setup_failed": true`) {
+		t.Error("meta.json should contain setup_failed: true")
+	}
+	if !strings.Contains(string(metaContent), `"exit_code": 7`) {
+		t.Error("meta.json should contain exit_code 7")
+	}
+}
+
+func TestService_RunSetup_SetupJsonOkFalse(t *testing.T) {
+	repoRoot, dataDir, cleanup := setupTempRepo(t)
+	defer cleanup()
+
+	// Set AGENCY_DATA_DIR
+	oldDataDir := os.Getenv("AGENCY_DATA_DIR")
+	os.Setenv("AGENCY_DATA_DIR", dataDir)
+	defer os.Setenv("AGENCY_DATA_DIR", oldDataDir)
+
+	// Change to repo directory
+	oldWd, _ := os.Getwd()
+	os.Chdir(repoRoot)
+	defer os.Chdir(oldWd)
+
+	resolvedRepoRoot, _ := filepath.EvalSymlinks(repoRoot)
+
+	svc := New()
+	ctx := context.Background()
+
+	runID := "20260110120000-json"
+	repoID := "abcd1234ef567890"
+
+	// Create worktree
+	st := &pipeline.PipelineState{
+		RunID:        runID,
+		Title:        "Setup JSON Test",
+		RepoRoot:     resolvedRepoRoot,
+		RepoID:       repoID,
+		DataDir:      dataDir,
+		ParentBranch: "main",
+		Runner:       "claude",
+	}
+
+	err := svc.CreateWorktree(ctx, st)
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	st.ResolvedRunnerCmd = "claude"
+	st.SetupScript = "scripts/agency_setup.sh"
+
+	// Write meta
+	err = svc.WriteMeta(ctx, st)
+	if err != nil {
+		t.Fatalf("WriteMeta failed: %v", err)
+	}
+
+	// Create setup script that exits 0 but writes ok=false to setup.json
+	scriptsDir := filepath.Join(st.WorktreePath, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatalf("failed to create scripts dir: %v", err)
+	}
+
+	setupScript := `#!/bin/bash
+echo '{"schema_version": "1.0", "ok": false, "summary": "test failure"}' > "$AGENCY_OUTPUT_DIR/setup.json"
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "agency_setup.sh"), []byte(setupScript), 0755); err != nil {
+		t.Fatalf("failed to write setup script: %v", err)
+	}
+
+	// Run setup - should fail due to setup.json ok=false
+	err = svc.RunSetup(ctx, st)
+	if err == nil {
+		t.Fatal("expected error for setup.json ok=false")
+	}
+
+	code := errors.GetCode(err)
+	if code != errors.EScriptFailed {
+		t.Errorf("error code = %q, want %q", code, errors.EScriptFailed)
+	}
+
+	// Verify meta was updated with failure and structured output
+	metaPath := filepath.Join(dataDir, "repos", repoID, "runs", runID, "meta.json")
+	metaContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("failed to read meta.json: %v", err)
+	}
+	if !strings.Contains(string(metaContent), `"setup_failed": true`) {
+		t.Error("meta.json should contain setup_failed: true")
+	}
+	if !strings.Contains(string(metaContent), `"output_ok": false`) {
+		t.Error("meta.json should contain output_ok: false")
+	}
+	if !strings.Contains(string(metaContent), `"output_summary": "test failure"`) {
+		t.Error("meta.json should contain output_summary")
+	}
+}
+
+func TestService_RunSetup_SetupJsonMalformed(t *testing.T) {
+	repoRoot, dataDir, cleanup := setupTempRepo(t)
+	defer cleanup()
+
+	// Set AGENCY_DATA_DIR
+	oldDataDir := os.Getenv("AGENCY_DATA_DIR")
+	os.Setenv("AGENCY_DATA_DIR", dataDir)
+	defer os.Setenv("AGENCY_DATA_DIR", oldDataDir)
+
+	// Change to repo directory
+	oldWd, _ := os.Getwd()
+	os.Chdir(repoRoot)
+	defer os.Chdir(oldWd)
+
+	resolvedRepoRoot, _ := filepath.EvalSymlinks(repoRoot)
+
+	svc := New()
+	ctx := context.Background()
+
+	runID := "20260110120000-malj"
+	repoID := "abcd1234ef567890"
+
+	// Create worktree
+	st := &pipeline.PipelineState{
+		RunID:        runID,
+		Title:        "Setup Malformed JSON Test",
+		RepoRoot:     resolvedRepoRoot,
+		RepoID:       repoID,
+		DataDir:      dataDir,
+		ParentBranch: "main",
+		Runner:       "claude",
+	}
+
+	err := svc.CreateWorktree(ctx, st)
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	st.ResolvedRunnerCmd = "claude"
+	st.SetupScript = "scripts/agency_setup.sh"
+
+	// Write meta
+	err = svc.WriteMeta(ctx, st)
+	if err != nil {
+		t.Fatalf("WriteMeta failed: %v", err)
+	}
+
+	// Create setup script that exits 0 but writes invalid JSON
+	scriptsDir := filepath.Join(st.WorktreePath, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatalf("failed to create scripts dir: %v", err)
+	}
+
+	setupScript := `#!/bin/bash
+echo 'not valid json {{{' > "$AGENCY_OUTPUT_DIR/setup.json"
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "agency_setup.sh"), []byte(setupScript), 0755); err != nil {
+		t.Fatalf("failed to write setup script: %v", err)
+	}
+
+	// Run setup - should succeed (malformed JSON is ignored)
+	err = svc.RunSetup(ctx, st)
+	if err != nil {
+		t.Fatalf("RunSetup failed unexpectedly: %v", err)
+	}
+
+	// Verify meta was updated without structured output fields
+	metaPath := filepath.Join(dataDir, "repos", repoID, "runs", runID, "meta.json")
+	metaContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("failed to read meta.json: %v", err)
+	}
+	// Should not contain output_ok since JSON was malformed
+	if strings.Contains(string(metaContent), `"output_ok"`) {
+		t.Error("meta.json should not contain output_ok for malformed JSON")
 	}
 }
 
