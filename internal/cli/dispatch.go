@@ -23,6 +23,7 @@ commands:
   init        create agency.json template and stub scripts
   doctor      check prerequisites and show resolved paths
   run         create workspace, setup, and start tmux runner session
+  ls          list runs and their statuses
   attach      attach to a tmux session for an existing run
 
 options:
@@ -84,6 +85,25 @@ examples:
   agency attach 20260110120000-a3f2
 `
 
+const lsUsageText = `usage: agency ls [options]
+
+list runs and their statuses.
+by default, lists runs for the current repo (excludes archived).
+if not inside a git repo, lists runs across all repos.
+
+options:
+  --all           include archived runs
+  --all-repos     list runs across all repos (ignores current repo scope)
+  --json          output as JSON (stable format)
+  -h, --help      show this help
+
+examples:
+  agency ls                    # list current repo runs
+  agency ls --all              # include archived runs
+  agency ls --all-repos        # list all repos
+  agency ls --json             # machine-readable output
+`
+
 // Run parses arguments and dispatches to the appropriate subcommand.
 // Returns an error if the command fails; the caller should print the error and exit.
 func Run(args []string, stdout, stderr io.Writer) error {
@@ -112,6 +132,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runDoctor(cmdArgs, stdout, stderr)
 	case "run":
 		return runRun(cmdArgs, stdout, stderr)
+	case "ls":
+		return runLS(cmdArgs, stdout, stderr)
 	case "attach":
 		return runAttach(cmdArgs, stdout, stderr)
 	default:
@@ -228,6 +250,46 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	}
 
 	return commands.Run(ctx, cr, fsys, cwd, opts, stdout, stderr)
+}
+
+func runLS(args []string, stdout, stderr io.Writer) error {
+	flagSet := flag.NewFlagSet("ls", flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
+
+	all := flagSet.Bool("all", false, "include archived runs")
+	allRepos := flagSet.Bool("all-repos", false, "list runs across all repos")
+	jsonOutput := flagSet.Bool("json", false, "output as JSON")
+
+	// Handle help manually to return nil (exit 0)
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			fmt.Fprint(stdout, lsUsageText)
+			return nil
+		}
+	}
+
+	if err := flagSet.Parse(args); err != nil {
+		return errors.Wrap(errors.EUsage, "invalid flags", err)
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return errors.Wrap(errors.EInternal, "failed to get working directory", err)
+	}
+
+	// Create real implementations
+	cr := exec.NewRealRunner()
+	fsys := fs.NewRealFS()
+	ctx := context.Background()
+
+	opts := commands.LSOpts{
+		All:      *all,
+		AllRepos: *allRepos,
+		JSON:     *jsonOutput,
+	}
+
+	return commands.LS(ctx, cr, fsys, cwd, opts, stdout, stderr)
 }
 
 func runAttach(args []string, stdout, stderr io.Writer) error {
