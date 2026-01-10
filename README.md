@@ -4,14 +4,14 @@ local-first runner manager: creates isolated git workspaces, launches `claude`/`
 
 ## status
 
-**v1 in development** — slice 0 (bootstrap) PR-03 complete.
+**v1 in development** — slice 0 (bootstrap) PR-04 complete.
 
 current progress:
 - [x] PR-00: project skeleton + shared contracts
 - [x] PR-01: directory resolution + repo discovery + origin parsing
 - [x] PR-02: agency.json schema + validation
 - [x] PR-03: persistence schemas + repo store
-- [ ] PR-04: `agency init` command
+- [x] PR-04: `agency init` command
 - [ ] PR-05: `agency doctor` command
 - [ ] PR-06: docs + cleanup
 
@@ -59,7 +59,8 @@ agency merge <id>
 ## commands
 
 ```
-agency init                       create agency.json template
+agency init [--no-gitignore] [--force]
+                                  create agency.json template + stub scripts
 agency run [--title] [--runner] [--parent]
                                   create workspace, setup, start tmux
 agency ls                         list runs + statuses
@@ -73,6 +74,29 @@ agency push <id> [--force]        push + create/update PR
 agency merge <id> [--force]       verify, confirm, merge, archive
 agency clean <id>                 archive without merging
 agency doctor                     check prerequisites + show paths
+```
+
+### `agency init`
+
+creates `agency.json` template and stub scripts in the current git repo.
+
+**flags:**
+- `--no-gitignore`: do not modify `.gitignore` (by default, `.agency/` is appended)
+- `--force`: overwrite existing `agency.json` (scripts are never overwritten)
+
+**files created:**
+- `agency.json` — configuration file with defaults
+- `scripts/agency_setup.sh` — stub setup script (exits 0)
+- `scripts/agency_verify.sh` — stub verify script (exits 1, must be replaced)
+- `scripts/agency_archive.sh` — stub archive script (exits 0)
+- `.gitignore` entry for `.agency/` (unless `--no-gitignore`)
+
+**output:**
+```
+repo_root: /path/to/repo
+agency_json: created
+scripts_created: scripts/agency_setup.sh, scripts/agency_verify.sh, scripts/agency_archive.sh
+gitignore: updated
 ```
 
 ## development
@@ -104,6 +128,7 @@ agency/
 ├── cmd/agency/           # main entry point
 ├── internal/
 │   ├── cli/              # command dispatcher (stdlib flag)
+│   ├── commands/         # command implementations (init, doctor, etc.)
 │   ├── config/           # agency.json loading + validation
 │   ├── errors/           # stable error codes
 │   ├── exec/             # CommandRunner interface for external commands
@@ -111,6 +136,7 @@ agency/
 │   ├── git/              # repo discovery + origin info
 │   ├── identity/         # repo_key + repo_id derivation
 │   ├── paths/            # XDG directory resolution
+│   ├── scaffold/         # agency.json template + stub script creation
 │   ├── store/            # repo_index.json + repo.json persistence
 │   └── version/          # build version
 └── docs/                 # specifications

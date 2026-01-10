@@ -2,11 +2,16 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 
+	"github.com/NielsdaWheelz/agency/internal/commands"
 	"github.com/NielsdaWheelz/agency/internal/errors"
+	"github.com/NielsdaWheelz/agency/internal/exec"
+	"github.com/NielsdaWheelz/agency/internal/fs"
 	"github.com/NielsdaWheelz/agency/internal/version"
 )
 
@@ -77,11 +82,11 @@ func Run(args []string, stdout, stderr io.Writer) error {
 }
 
 func runInit(args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	flagSet := flag.NewFlagSet("init", flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
 
-	noGitignore := fs.Bool("no-gitignore", false, "do not modify .gitignore")
-	force := fs.Bool("force", false, "overwrite existing agency.json")
+	noGitignore := flagSet.Bool("no-gitignore", false, "do not modify .gitignore")
+	force := flagSet.Bool("force", false, "overwrite existing agency.json")
 
 	// Handle help manually to return nil (exit 0)
 	for _, arg := range args {
@@ -91,15 +96,27 @@ func runInit(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	if err := fs.Parse(args); err != nil {
+	if err := flagSet.Parse(args); err != nil {
 		return errors.Wrap(errors.EUsage, "invalid flags", err)
 	}
 
-	// Flags are parsed but command is not implemented
-	_ = noGitignore
-	_ = force
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return errors.Wrap(errors.ENoRepo, "failed to get working directory", err)
+	}
 
-	return errors.New(errors.ENotImplemented, "agency init is not yet implemented")
+	// Create real implementations
+	cr := exec.NewRealRunner()
+	fsys := fs.NewRealFS()
+	ctx := context.Background()
+
+	opts := commands.InitOpts{
+		NoGitignore: *noGitignore,
+		Force:       *force,
+	}
+
+	return commands.Init(ctx, cr, fsys, cwd, opts, stdout, stderr)
 }
 
 func runDoctor(args []string, stdout, stderr io.Writer) error {
