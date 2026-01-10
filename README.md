@@ -31,11 +31,11 @@ slice 2 progress:
 - [x] PR-01: run discovery + parsing + broken run records
 - [x] PR-02: run id resolution (exact + unique prefix)
 - [x] PR-03: derived status computation (pure)
-- [ ] PR-04: `agency ls` command
+- [x] PR-04: `agency ls` command
 - [ ] PR-05: `agency show` command
 - [ ] PR-06: transcript capture + events.jsonl
 
-next: slice 2 PR-04 (`agency ls` command)
+next: slice 2 PR-05 (`agency show` command)
 
 ## installation
 
@@ -233,6 +233,84 @@ if the run fails after worktree creation, the error output includes:
 
 the worktree and metadata are retained for debugging; use `agency clean <id>` to remove.
 
+### `agency ls`
+
+lists runs and their statuses.
+
+**usage:**
+```bash
+agency ls [--all] [--all-repos] [--json]
+```
+
+**flags:**
+- `--all`: include archived runs (worktree deleted)
+- `--all-repos`: list runs across all repos (ignores current repo scope)
+- `--json`: output as JSON (stable format)
+
+**default behavior:**
+- if **inside a git repo**: lists runs for that repo only, excluding archived
+- if **outside any git repo**: lists runs across all repos, excluding archived
+
+**human output columns:**
+- `RUN_ID`: full run identifier
+- `TITLE`: run title (truncated to 50 chars; `<broken>` for corrupt meta; `<untitled>` for empty)
+- `RUNNER`: runner name (empty for broken runs)
+- `CREATED`: relative timestamp (e.g., "2 hours ago")
+- `STATUS`: derived status (e.g., "active", "idle", "ready for review", "merged (archived)")
+- `PR`: PR number if exists (e.g., "#123")
+
+**status values:**
+- `active` / `active (pr)`: tmux session exists
+- `idle` / `idle (pr)`: no tmux session, worktree present
+- `ready for review`: PR exists, pushed, report non-empty
+- `needs attention`: verify failed, PR not mergeable, or stop requested
+- `failed`: setup script failed
+- `merged`: PR merged
+- `abandoned`: explicitly abandoned
+- `broken`: meta.json is unreadable/invalid
+- `(archived)` suffix: worktree no longer exists
+
+**json output:**
+```json
+{
+  "schema_version": "1.0",
+  "data": [
+    {
+      "run_id": "20260110120000-a3f2",
+      "repo_id": "abc123",
+      "repo_key": "github:owner/repo",
+      "origin_url": "git@github.com:owner/repo.git",
+      "title": "implement feature X",
+      "runner": "claude",
+      "created_at": "2026-01-10T12:00:00Z",
+      "last_push_at": "2026-01-10T14:00:00Z",
+      "tmux_active": true,
+      "worktree_present": true,
+      "archived": false,
+      "pr_number": 123,
+      "pr_url": "https://github.com/owner/repo/pull/123",
+      "derived_status": "ready for review",
+      "broken": false
+    }
+  ]
+}
+```
+
+**sorting:**
+- newest `created_at` first
+- broken runs (null `created_at`) sort last
+- tie-breaker: `run_id` ascending
+
+**examples:**
+```bash
+agency ls                    # list current repo runs
+agency ls --all              # include archived runs
+agency ls --all-repos        # list all repos
+agency ls --all-repos --all  # everything
+agency ls --json             # machine-readable output
+agency ls --json | jq '.data[].run_id'
+```
+
 ### `agency attach`
 
 attaches to an existing tmux session for a run.
@@ -293,7 +371,7 @@ agency/
 ├── cmd/agency/           # main entry point
 ├── internal/
 │   ├── cli/              # command dispatcher (stdlib flag)
-│   ├── commands/         # command implementations (init, doctor, etc.)
+│   ├── commands/         # command implementations (init, doctor, run, ls, attach)
 │   ├── config/           # agency.json loading + validation (LoadAndValidate, ValidateForS1)
 │   ├── core/             # run id generation, slugify, branch naming, shell escaping
 │   ├── errors/           # stable error codes + AgencyError type
@@ -305,6 +383,7 @@ agency/
 │   ├── lock/             # repo-level locking for mutating commands
 │   ├── paths/            # XDG directory resolution
 │   ├── pipeline/         # run pipeline orchestrator (step execution, error handling)
+│   ├── render/           # output formatting for ls/show (human tables + JSON envelopes)
 │   ├── repo/             # repo safety checks + CheckRepoSafe API
 │   ├── runservice/       # concrete RunService implementation (wires all steps, setup execution)
 │   ├── scaffold/         # agency.json template + stub script creation
