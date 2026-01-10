@@ -24,8 +24,12 @@ implement `agency run` to create an isolated git worktree + branch, execute the 
   - attaches to tmux session `agency:<run_id>` (no creation; no resume behavior in this slice)
 
 - minimal `agency ls` (current repo only; non-archived only):
-  - lists runs by scanning `${AGENCY_DATA_DIR}/repos/<repo_id>/runs/*/meta.json`
-  - displays: run_id, title, runner, created_at, tmux_session_exists (boolean)
+  - lists runs by scanning `${AGENCY_DATA_DIR}/repos/<repo_id>/runs/*/`
+  - if `meta.json` is missing or invalid for a run dir, still show a row flagged as broken with the run path
+  - archived definition: `meta.archive.archived_at` exists (even if archive logic is added later)
+  - in this slice, archive is not implemented; treat all runs as non-archived
+  - displays: run_id, title, runner, created_at, tmux_session_exists (boolean), broken (boolean)
+  - stable sort by `created_at` desc (missing/invalid `created_at` sort last)
   - no rich status derivation beyond tmux session existence
 
 ### out-of-scope
@@ -88,13 +92,13 @@ implement `agency run` to create an isolated git worktree + branch, execute the 
 - `E_WORKTREE_CREATE_FAILED` — `git worktree add` / branch creation failed
 - `E_TMUX_SESSION_EXISTS` — tmux session name collision for this run_id (should be extremely rare)
 - `E_TMUX_FAILED` — tmux session creation failed (non-zero exit)
+- `E_TMUX_SESSION_MISSING` — attach requested but tmux session does not exist for a known run
 
 (existing error codes used in this slice)
 - `E_NO_REPO`
 - `E_NO_AGENCY_JSON`
 - `E_INVALID_AGENCY_JSON`
 - `E_RUNNER_NOT_CONFIGURED`
-- `E_GH_NOT_AUTHENTICATED` (doctor prerequisite; run itself does not require auth in this slice)
 - `E_TMUX_NOT_INSTALLED`
 - `E_PARENT_DIRTY`
 - `E_SCRIPT_TIMEOUT`
@@ -111,6 +115,7 @@ implement `agency run` to create an isolated git worktree + branch, execute the 
 - repo root checkout is clean: `git status --porcelain` is empty
 - `agency.json` exists and validates
 - local parent branch exists: `refs/heads/<parent_branch>`
+  - checked via `git show-ref --verify refs/heads/<parent_branch>`
 - setup script exits 0 within 10m
 - tmux installed
 
@@ -125,10 +130,14 @@ implement `agency run` to create an isolated git worktree + branch, execute the 
 - `<worktree>/.agency/report.md` exists (templated; title prefilled)
 - setup script executes outside tmux with injected env; stdout/stderr captured to `logs/setup.log`
 - tmux session `agency:<run_id>` is created detached, with pane command:
-  - `sh -lc 'cd "<worktree>" && exec <runner_cmd>'`
+  - runner command is executed via `sh -lc` and treated as a shell command string (users may include wrappers/args)
+  - example: `sh -lc 'cd "<worktree>" && exec <runner_cmd>'`
 - `meta.json` exists and includes required fields (see below)
 - command exits 0
-- command prints next steps:
+- command prints next steps and run details:
+  - `run_id`
+  - `worktree_path`
+  - `tmux_session_name`
   - `agency attach <run_id>`
 
 ### 2) successful run with immediate attach
@@ -177,7 +186,7 @@ implement `agency run` to create an isolated git worktree + branch, execute the 
 **then**
 - exit non-zero with `E_SCRIPT_FAILED` or `E_SCRIPT_TIMEOUT`
 - write `meta.json` with `flags.setup_failed=true`
-- retain worktree for inspection
+- retain worktree and branch for inspection
 - do **not** create tmux session
 - setup log exists at `logs/setup.log`
 
@@ -214,8 +223,9 @@ implement `agency run` to create an isolated git worktree + branch, execute the 
 - `agency attach <run_id>`
 
 **then**
-- exit non-zero with `E_RUN_NOT_FOUND` (if run_id unknown) or `E_TMUX_FAILED` (if run exists but no session)
+- exit non-zero with `E_RUN_NOT_FOUND` (if run_id unknown) or `E_TMUX_SESSION_MISSING` (if run exists but no session)
 - message instructs user that resume is not in this slice (deferred) and suggests re-running runner manually inside worktree
+
 
 ---
 
@@ -238,6 +248,11 @@ optional fields updated in this slice:
 - `flags.setup_failed` (boolean)
 - `flags.needs_attention` (not set in this slice)
 - `last_seen_at` (optional; if implemented, must be rfc3339)
+- `archive.archived_at` (optional; rfc3339 if set)
+
+versioning note:
+- `agency.json` uses integer `version` (e.g., `1`)
+- `meta.json` uses string `schema_version` (e.g., `"1.0"`)
 
 ### atomic write requirement
 
@@ -297,6 +312,9 @@ guardrails (what not to touch)
 	•	do not modify the parent repo checkout (beyond reading status/root)
 	•	do not add new persistent formats beyond those listed
 	•	do not create additional global daemons; tmux is the only substrate
+	•	`.agency/` ignore check (best-effort):
+	•	run `git check-ignore -q .agency/` at repo root
+	•	exit 0 = ignored, 1 = not ignored, 128 = error (treat as unknown, do not warn)
 
 ⸻
 
