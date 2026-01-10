@@ -50,6 +50,9 @@ const (
 	ERunDirExists       Code = "E_RUN_DIR_EXISTS"
 	ERunDirCreateFailed Code = "E_RUN_DIR_CREATE_FAILED"
 	EMetaWriteFailed    Code = "E_META_WRITE_FAILED"
+
+	// Tmux attach error codes (slice 1 PR-09)
+	ETmuxAttachFailed Code = "E_TMUX_ATTACH_FAILED"
 )
 
 // AgencyError is the standard error type for agency errors.

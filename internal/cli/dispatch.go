@@ -22,6 +22,7 @@ usage: agency <command> [options]
 commands:
   init        create agency.json template and stub scripts
   doctor      check prerequisites and show resolved paths
+  run         create workspace, setup, and start tmux runner session
   attach      attach to a tmux session for an existing run
 
 options:
@@ -48,6 +49,24 @@ verifies git, tmux, gh, runner command, and scripts are present and configured.
 
 options:
   -h, --help    show this help
+`
+
+const runUsageText = `usage: agency run [options]
+
+create workspace, run setup, and start tmux runner session.
+requires cwd to be inside a git repo with agency.json.
+
+options:
+  --title <string>    run title (default: untitled-<shortid>)
+  --runner <name>     runner name: claude or codex (default: agency.json defaults.runner)
+  --parent <branch>   parent branch (default: agency.json defaults.parent_branch)
+  --attach            attach to tmux session immediately after creation
+  -h, --help          show this help
+
+examples:
+  agency run --title "implement feature X" --runner claude
+  agency run --attach
+  agency run --parent develop
 `
 
 const attachUsageText = `usage: agency attach <run_id>
@@ -91,6 +110,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runInit(cmdArgs, stdout, stderr)
 	case "doctor":
 		return runDoctor(cmdArgs, stdout, stderr)
+	case "run":
+		return runRun(cmdArgs, stdout, stderr)
 	case "attach":
 		return runAttach(cmdArgs, stdout, stderr)
 	default:
@@ -165,6 +186,48 @@ func runDoctor(args []string, stdout, stderr io.Writer) error {
 	ctx := context.Background()
 
 	return commands.Doctor(ctx, cr, fsys, cwd, stdout, stderr)
+}
+
+func runRun(args []string, stdout, stderr io.Writer) error {
+	flagSet := flag.NewFlagSet("run", flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
+
+	title := flagSet.String("title", "", "run title")
+	runner := flagSet.String("runner", "", "runner name (claude or codex)")
+	parent := flagSet.String("parent", "", "parent branch")
+	attach := flagSet.Bool("attach", false, "attach to tmux session immediately")
+
+	// Handle help manually to return nil (exit 0)
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			fmt.Fprint(stdout, runUsageText)
+			return nil
+		}
+	}
+
+	if err := flagSet.Parse(args); err != nil {
+		return errors.Wrap(errors.EUsage, "invalid flags", err)
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return errors.Wrap(errors.ENoRepo, "failed to get working directory", err)
+	}
+
+	// Create real implementations
+	cr := exec.NewRealRunner()
+	fsys := fs.NewRealFS()
+	ctx := context.Background()
+
+	opts := commands.RunOpts{
+		Title:  *title,
+		Runner: *runner,
+		Parent: *parent,
+		Attach: *attach,
+	}
+
+	return commands.Run(ctx, cr, fsys, cwd, opts, stdout, stderr)
 }
 
 func runAttach(args []string, stdout, stderr io.Writer) error {

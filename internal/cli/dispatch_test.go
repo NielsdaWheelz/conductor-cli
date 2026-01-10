@@ -165,3 +165,91 @@ func TestRun_DoctorNotInRepo(t *testing.T) {
 		t.Errorf("code = %q, want %q", errors.GetCode(err), errors.ENoRepo)
 	}
 }
+
+func TestRun_RunHelp(t *testing.T) {
+	tests := []string{"-h", "--help"}
+	for _, arg := range tests {
+		t.Run(arg, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := Run([]string{"run", arg}, &stdout, &stderr)
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(stdout.String(), "agency run") {
+				t.Error("expected run usage in stdout")
+			}
+			// Verify flags are documented
+			if !strings.Contains(stdout.String(), "--title") {
+				t.Error("expected --title in run usage")
+			}
+			if !strings.Contains(stdout.String(), "--runner") {
+				t.Error("expected --runner in run usage")
+			}
+			if !strings.Contains(stdout.String(), "--parent") {
+				t.Error("expected --parent in run usage")
+			}
+			if !strings.Contains(stdout.String(), "--attach") {
+				t.Error("expected --attach in run usage")
+			}
+		})
+	}
+}
+
+// TestRun_RunNotInRepo tests that run fails when not in a git repo.
+// This test verifies the CLI wiring works.
+func TestRun_RunNotInRepo(t *testing.T) {
+	// Save and restore cwd
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get cwd: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	// Change to temp dir that is NOT a git repo
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = Run([]string{"run"}, &stdout, &stderr)
+
+	if err == nil {
+		t.Fatal("expected error when not in git repo")
+	}
+	// The run command goes through the pipeline which will fail at CheckRepoSafe
+	// with E_NO_REPO
+	if errors.GetCode(err) != errors.ENoRepo {
+		t.Errorf("code = %q, want %q", errors.GetCode(err), errors.ENoRepo)
+	}
+}
+
+func TestRun_AttachHelp(t *testing.T) {
+	tests := []string{"-h", "--help"}
+	for _, arg := range tests {
+		t.Run(arg, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := Run([]string{"attach", arg}, &stdout, &stderr)
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(stdout.String(), "agency attach") {
+				t.Error("expected attach usage in stdout")
+			}
+		})
+	}
+}
+
+func TestRun_AttachMissingRunID(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := Run([]string{"attach"}, &stdout, &stderr)
+
+	if err == nil {
+		t.Fatal("expected error when run_id is missing")
+	}
+	if errors.GetCode(err) != errors.EUsage {
+		t.Errorf("code = %q, want %q", errors.GetCode(err), errors.EUsage)
+	}
+}
