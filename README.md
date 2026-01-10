@@ -22,8 +22,9 @@ slice 1 progress:
 - [x] PR-04: run pipeline orchestration (internal API)
 - [x] PR-05: worktree + scaffolding + collision handling
 - [x] PR-06: meta.json writer + run dir creation
+- [x] PR-07: setup script execution + logging
 
-next: slice 1 PR-07 (setup script execution + logging)
+next: slice 1 PR-08 (tmux session creation + attach command)
 
 ## installation
 
@@ -203,7 +204,7 @@ agency/
 │   ├── paths/            # XDG directory resolution
 │   ├── pipeline/         # run pipeline orchestrator (step execution, error handling)
 │   ├── repo/             # repo safety checks + CheckRepoSafe API
-│   ├── runservice/       # concrete RunService implementation (wires all steps)
+│   ├── runservice/       # concrete RunService implementation (wires all steps, setup execution)
 │   ├── scaffold/         # agency.json template + stub script creation
 │   ├── store/            # repo_index.json + repo.json + run meta.json persistence
 │   ├── version/          # build version

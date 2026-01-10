@@ -5,7 +5,12 @@ package runservice
 
 import (
 	"context"
+	"encoding/json"
+	stderrors "errors"
+	"fmt"
 	"os"
+	osexec "os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/NielsdaWheelz/agency/internal/config"
@@ -346,14 +351,270 @@ func (s *Service) WriteMeta(ctx context.Context, st *pipeline.PipelineState) err
 	return nil
 }
 
+// SetupTimeout is the timeout for the setup script (10 minutes per spec).
+const SetupTimeout = 10 * time.Minute
+
 // RunSetup executes the setup script with timeout.
-// Not implemented in this PR (PR-07).
+// Runs the configured setup script via `sh -lc <setup_script>` in the worktree.
+// Captures stdout/stderr to logs/setup.log (truncated on each attempt).
+// Updates meta.json with setup evidence (flags.setup_failed, setup.* fields).
+// Optionally parses .agency/out/setup.json for structured output.
 func (s *Service) RunSetup(ctx context.Context, st *pipeline.PipelineState) error {
-	return errors.NewWithDetails(
-		errors.ENotImplemented,
-		"RunSetup not implemented (PR-07)",
-		map[string]string{"step": "RunSetup"},
-	)
+	// Build paths
+	st2 := store.NewStore(s.fsys, st.DataDir, s.nowFunc)
+	logsDir := st2.RunLogsDir(st.RepoID, st.RunID)
+	logPath := filepath.Join(logsDir, "setup.log")
+
+	// Ensure logs directory exists (should exist from WriteMeta, but be safe)
+	if err := s.fsys.MkdirAll(logsDir, 0o700); err != nil {
+		return errors.WrapWithDetails(
+			errors.EInternal,
+			"failed to ensure logs directory exists",
+			err,
+			map[string]string{"logs_dir": logsDir},
+		)
+	}
+
+	// Build environment variables
+	env := buildSetupEnv(st, logsDir)
+
+	// Execute setup script
+	result := executeSetupScript(ctx, st.SetupScript, st.WorktreePath, env, logPath, SetupTimeout)
+
+	// Parse optional setup.json if it exists
+	setupJSONPath := filepath.Join(st.WorktreePath, ".agency", "out", "setup.json")
+	structuredOutput := parseSetupJSON(s.fsys, setupJSONPath)
+
+	// Determine if setup failed
+	setupFailed := result.Failed
+	if !setupFailed && structuredOutput != nil && structuredOutput.Ok != nil && !*structuredOutput.Ok {
+		// setup.json says ok=false, override success
+		setupFailed = true
+	}
+
+	// Build setup metadata
+	setupMeta := &store.RunMetaSetup{
+		Command:    "sh -lc " + st.SetupScript,
+		ExitCode:   result.ExitCode,
+		DurationMs: result.DurationMs,
+		TimedOut:   result.TimedOut,
+		LogPath:    logPath,
+	}
+
+	// Add structured output fields if present
+	if structuredOutput != nil {
+		setupMeta.OutputOk = structuredOutput.Ok
+		setupMeta.OutputSummary = structuredOutput.Summary
+	}
+
+	// Update meta.json atomically (read-modify-write)
+	err := st2.UpdateMeta(st.RepoID, st.RunID, func(meta *store.RunMeta) {
+		meta.Setup = setupMeta
+		if setupFailed {
+			if meta.Flags == nil {
+				meta.Flags = &store.RunMetaFlags{}
+			}
+			meta.Flags.SetupFailed = true
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	// Return error if setup failed
+	if result.TimedOut {
+		return errors.NewWithDetails(
+			errors.EScriptTimeout,
+			"setup script timed out after "+SetupTimeout.String(),
+			map[string]string{
+				"command":  "sh -lc " + st.SetupScript,
+				"log_path": logPath,
+			},
+		)
+	}
+	if setupFailed {
+		msg := "setup script failed"
+		if structuredOutput != nil && structuredOutput.Ok != nil && !*structuredOutput.Ok {
+			msg = "setup script reported failure via setup.json"
+			if structuredOutput.Summary != "" {
+				msg += ": " + structuredOutput.Summary
+			}
+		}
+		return errors.NewWithDetails(
+			errors.EScriptFailed,
+			msg,
+			map[string]string{
+				"command":   "sh -lc " + st.SetupScript,
+				"exit_code": fmt.Sprintf("%d", result.ExitCode),
+				"log_path":  logPath,
+			},
+		)
+	}
+
+	return nil
+}
+
+// setupResult holds the result of setup script execution.
+type setupResult struct {
+	ExitCode   int
+	DurationMs int64
+	TimedOut   bool
+	Failed     bool
+}
+
+// executeSetupScript runs the setup script and captures output to the log file.
+func executeSetupScript(ctx context.Context, script, workDir string, env map[string]string, logPath string, timeout time.Duration) setupResult {
+	start := time.Now()
+
+	// Create/truncate log file
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return setupResult{ExitCode: -1, Failed: true}
+	}
+
+	// Write header to log
+	fmt.Fprintf(logFile, "# agency setup log\n")
+	fmt.Fprintf(logFile, "# timestamp: %s\n", start.UTC().Format(time.RFC3339))
+	fmt.Fprintf(logFile, "# command: sh -lc %s\n", script)
+	fmt.Fprintf(logFile, "# cwd: %s\n", workDir)
+	fmt.Fprintf(logFile, "# ---\n\n")
+
+	// Apply timeout
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	// Build command: sh -lc <script>
+	cmd := osexec.CommandContext(ctx, "sh", "-lc", script)
+	cmd.Dir = workDir
+
+	// Set stdout/stderr to log file
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	// Open /dev/null for stdin
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		logFile.Close()
+		return setupResult{ExitCode: -1, Failed: true}
+	}
+	cmd.Stdin = devnull
+	defer devnull.Close()
+
+	// Build environment: inherit + overlay AGENCY_* vars
+	cmd.Env = os.Environ()
+	for k, v := range env {
+		cmd.Env = setEnvVar(cmd.Env, k, v)
+	}
+
+	// Run command
+	runErr := cmd.Run()
+	duration := time.Since(start)
+	durationMs := duration.Milliseconds()
+
+	// Close log file
+	logFile.Close()
+
+	result := setupResult{
+		DurationMs: durationMs,
+	}
+
+	if runErr != nil {
+		// Check for timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			result.ExitCode = -1
+			result.TimedOut = true
+			result.Failed = true
+			return result
+		}
+
+		// Check for exit error
+		var exitErr *osexec.ExitError
+		if stderrors.As(runErr, &exitErr) {
+			result.ExitCode = exitErr.ExitCode()
+			result.Failed = true
+			return result
+		}
+
+		// Other error (failed to start)
+		result.ExitCode = -1
+		result.Failed = true
+		return result
+	}
+
+	result.ExitCode = 0
+	result.Failed = false
+	return result
+}
+
+// setEnvVar sets or replaces an environment variable in the env slice.
+func setEnvVar(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if len(e) > len(prefix) && e[:len(prefix)] == prefix {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
+// buildSetupEnv builds the environment variables for the setup script.
+func buildSetupEnv(st *pipeline.PipelineState, logsDir string) map[string]string {
+	dotAgencyDir := filepath.Join(st.WorktreePath, ".agency")
+	outputDir := filepath.Join(dotAgencyDir, "out")
+
+	env := map[string]string{
+		"AGENCY_RUN_ID":         st.RunID,
+		"AGENCY_TITLE":          st.Title,
+		"AGENCY_REPO_ROOT":      st.RepoRoot,
+		"AGENCY_WORKSPACE_ROOT": st.WorktreePath,
+		"AGENCY_BRANCH":         st.Branch,
+		"AGENCY_PARENT_BRANCH":  st.ParentBranch,
+		"AGENCY_ORIGIN_NAME":    "origin",
+		"AGENCY_ORIGIN_URL":     st.OriginURL,
+		"AGENCY_RUNNER":         st.Runner,
+		"AGENCY_PR_URL":         "", // empty in S1 (no PR yet)
+		"AGENCY_PR_NUMBER":      "", // empty in S1 (no PR yet)
+		"AGENCY_DOTAGENCY_DIR":  dotAgencyDir,
+		"AGENCY_OUTPUT_DIR":     outputDir,
+		"AGENCY_LOG_DIR":        logsDir,
+		"AGENCY_NONINTERACTIVE": "1",
+		"CI":                    "1",
+	}
+	return env
+}
+
+// structuredSetupOutput represents the optional .agency/out/setup.json output.
+type structuredSetupOutput struct {
+	Ok      *bool
+	Summary string
+}
+
+// parseSetupJSON attempts to parse .agency/out/setup.json if it exists.
+// Returns nil if the file doesn't exist or is invalid JSON.
+func parseSetupJSON(fsys fs.FS, path string) *structuredSetupOutput {
+	data, err := fsys.ReadFile(path)
+	if err != nil {
+		return nil // file doesn't exist or can't be read
+	}
+
+	var raw struct {
+		SchemaVersion string `json:"schema_version"`
+		Ok            *bool  `json:"ok"`
+		Summary       string `json:"summary"`
+	}
+
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil // invalid JSON, ignore
+	}
+
+	return &structuredSetupOutput{
+		Ok:      raw.Ok,
+		Summary: raw.Summary,
+	}
 }
 
 // StartTmux creates the tmux session with the runner command.

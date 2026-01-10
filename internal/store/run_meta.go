@@ -85,14 +85,26 @@ type RunMetaFlags struct {
 
 // RunMetaSetup contains setup script execution details.
 type RunMetaSetup struct {
-	// ExitCode is the exit code of the setup script.
-	ExitCode int `json:"exit_code,omitempty"`
+	// Command is the exact command string executed (e.g., "sh -lc scripts/agency_setup.sh").
+	Command string `json:"command,omitempty"`
+
+	// ExitCode is the exit code of the setup script (0=success, -1=failed to start).
+	ExitCode int `json:"exit_code"`
 
 	// DurationMs is the duration of the setup script in milliseconds.
 	DurationMs int64 `json:"duration_ms,omitempty"`
 
 	// TimedOut is true if the setup script timed out.
 	TimedOut bool `json:"timed_out,omitempty"`
+
+	// LogPath is the absolute path to the setup log file.
+	LogPath string `json:"log_path,omitempty"`
+
+	// OutputOk is the value of "ok" from .agency/out/setup.json (if present and parsed).
+	OutputOk *bool `json:"output_ok,omitempty"`
+
+	// OutputSummary is the value of "summary" from .agency/out/setup.json (if present and parsed).
+	OutputSummary string `json:"output_summary,omitempty"`
 }
 
 // RunMetaArchive contains archive-related fields.
