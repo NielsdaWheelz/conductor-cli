@@ -4,7 +4,7 @@ local-first runner manager: creates isolated git workspaces, launches `claude`/`
 
 ## status
 
-**v1 in development** — slice 0 (bootstrap) complete, slice 1 in progress.
+**v1 in development** — slice 0 (bootstrap) complete, slice 1 complete.
 
 slice 0 progress:
 - [x] PR-00: project skeleton + shared contracts
@@ -24,8 +24,9 @@ slice 1 progress:
 - [x] PR-06: meta.json writer + run dir creation
 - [x] PR-07: setup script execution + logging
 - [x] PR-08: tmux session creation + attach command
+- [x] PR-09: wire agency run end-to-end + --attach UX
 
-next: slice 1 PR-09 (wire agency run end-to-end + --attach UX)
+next: slice 2 (observability: ls, show, events)
 
 ## installation
 
@@ -164,6 +165,64 @@ status: ok
 - `E_SCRIPT_NOT_FOUND` — required script not found
 - `E_SCRIPT_NOT_EXECUTABLE` — script is not executable (suggests `chmod +x`)
 - `E_PERSIST_FAILED` — failed to write persistence files
+
+### `agency run`
+
+creates an isolated workspace and launches the runner in a tmux session.
+
+**usage:**
+```bash
+agency run [--title <string>] [--runner <name>] [--parent <branch>] [--attach]
+```
+
+**flags:**
+- `--title`: run title (default: `untitled-<shortid>`)
+- `--runner`: runner name: `claude` or `codex` (default: agency.json `defaults.runner`)
+- `--parent`: parent branch to branch from (default: agency.json `defaults.parent_branch`)
+- `--attach`: attach to tmux session immediately after creation
+
+**behavior:**
+1. validates parent working tree is clean (`git status --porcelain`)
+2. creates git worktree + branch under `${AGENCY_DATA_DIR}/repos/<repo_id>/worktrees/<run_id>/`
+3. creates `.agency/`, `.agency/out/`, `.agency/tmp/` directories
+4. creates `.agency/report.md` with template (title prefilled)
+5. runs `scripts.setup` with injected environment variables (timeout: 10 minutes)
+6. creates tmux session `agency_<run_id>` running the runner command
+7. writes `meta.json` with run metadata
+
+**success output:**
+```
+run_id: 20260110120000-a3f2
+title: implement feature X
+runner: claude
+parent: main
+branch: agency/implement-feature-x-a3f2
+worktree: ~/Library/Application Support/agency/repos/abc123/worktrees/20260110120000-a3f2
+tmux: agency_20260110120000-a3f2
+next: agency attach 20260110120000-a3f2
+```
+
+**error codes:**
+- `E_NO_REPO` — not inside a git repository
+- `E_NO_AGENCY_JSON` — agency.json not found
+- `E_INVALID_AGENCY_JSON` — agency.json validation failed
+- `E_PARENT_DIRTY` — parent working tree has uncommitted changes
+- `E_EMPTY_REPO` — repository has no commits
+- `E_PARENT_BRANCH_NOT_FOUND` — specified parent branch does not exist locally
+- `E_WORKTREE_CREATE_FAILED` — git worktree add failed
+- `E_SCRIPT_FAILED` — setup script exited non-zero
+- `E_SCRIPT_TIMEOUT` — setup script timed out (>10 minutes)
+- `E_TMUX_FAILED` — tmux session creation failed
+- `E_TMUX_ATTACH_FAILED` — tmux attach failed (with `--attach`)
+
+**on failure:**
+
+if the run fails after worktree creation, the error output includes:
+- `run_id`
+- `worktree` path (for inspection)
+- `setup_log` path (if setup failed)
+
+the worktree and metadata are retained for debugging; use `agency clean <id>` to remove.
 
 ### `agency attach`
 
