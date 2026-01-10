@@ -66,7 +66,7 @@ implement `agency run` to create an isolated git worktree + branch, execute the 
 
 - `${AGENCY_DATA_DIR}/repos/<repo_id>/repo.json` (ensure exists; update `last_seen_at` + `origin_url` if present)
 - `${AGENCY_DATA_DIR}/repos/<repo_id>/runs/<run_id>/meta.json` (create; may be updated during run)
-- `${AGENCY_DATA_DIR}/repos/<repo_id>/runs/<run_id>/logs/setup.log` (create; append if exists)
+- `${AGENCY_DATA_DIR}/repos/<repo_id>/runs/<run_id>/logs/setup.log` (create; overwrite on each run attempt)
 - `${AGENCY_DATA_DIR}/repos/<repo_id>/worktrees/<run_id>/` (git worktree directory)
 
 ### created/updated (workspace-local; under the worktree)
@@ -152,8 +152,7 @@ implement `agency run` to create an isolated git worktree + branch, execute the 
 **then**
 - all outcomes of (1) occur
 - after tmux session creation:
-  - if `TMUX` is set (already inside tmux), run `tmux attach -t agency:<run_id>` and exit 0
-  - otherwise, attach to `agency:<run_id>` (blocking until user detaches/exits tmux client)
+  - attach to `agency:<run_id>` (blocking until user detaches/exits tmux client)
 
 ### 3) parent working tree dirty
 
