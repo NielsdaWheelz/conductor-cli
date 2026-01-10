@@ -4,7 +4,7 @@ local-first runner manager: creates isolated git workspaces, launches `claude`/`
 
 ## status
 
-**v1 in development** — slice 0 (bootstrap) PR-04 complete.
+**v1 in development** — slice 0 (bootstrap) PR-05 complete.
 
 current progress:
 - [x] PR-00: project skeleton + shared contracts
@@ -12,7 +12,7 @@ current progress:
 - [x] PR-02: agency.json schema + validation
 - [x] PR-03: persistence schemas + repo store
 - [x] PR-04: `agency init` command
-- [ ] PR-05: `agency doctor` command
+- [x] PR-05: `agency doctor` command
 - [ ] PR-06: docs + cleanup
 
 ## installation
@@ -98,6 +98,60 @@ agency_json: created
 scripts_created: scripts/agency_setup.sh, scripts/agency_verify.sh, scripts/agency_archive.sh
 gitignore: updated
 ```
+
+### `agency doctor`
+
+verifies all prerequisites are met for running agency commands.
+
+**checks:**
+- repo root discovery via `git rev-parse --show-toplevel`
+- `agency.json` exists and is valid
+- required tools installed: `git`, `tmux`, `gh`
+- `gh` is authenticated (`gh auth status`)
+- runner command exists (e.g., `claude` or `codex` on PATH)
+- scripts exist and are executable
+
+**on success:**
+- writes/updates `${AGENCY_DATA_DIR}/repo_index.json`
+- writes/updates `${AGENCY_DATA_DIR}/repos/<repo_id>/repo.json`
+
+**output (stable key: value format):**
+```
+repo_root: /path/to/repo
+agency_data_dir: ~/Library/Application Support/agency
+agency_config_dir: ~/Library/Preferences/agency
+agency_cache_dir: ~/Library/Caches/agency
+repo_key: github:owner/repo
+repo_id: abcd1234ef567890
+origin_present: true
+origin_url: git@github.com:owner/repo.git
+origin_host: github.com
+github_flow_available: true
+git_version: git version 2.40.0
+tmux_version: tmux 3.3a
+gh_version: gh version 2.40.0 (2024-01-15)
+gh_authenticated: true
+defaults_parent_branch: main
+defaults_runner: claude
+runner_cmd: claude
+script_setup: /path/to/repo/scripts/agency_setup.sh
+script_verify: /path/to/repo/scripts/agency_verify.sh
+script_archive: /path/to/repo/scripts/agency_archive.sh
+status: ok
+```
+
+**error codes:**
+- `E_NO_REPO` — not inside a git repository
+- `E_NO_AGENCY_JSON` — agency.json not found
+- `E_INVALID_AGENCY_JSON` — agency.json validation failed
+- `E_GIT_NOT_INSTALLED` — git not found
+- `E_TMUX_NOT_INSTALLED` — tmux not found
+- `E_GH_NOT_INSTALLED` — gh CLI not found
+- `E_GH_NOT_AUTHENTICATED` — gh not authenticated
+- `E_RUNNER_NOT_CONFIGURED` — runner command not found
+- `E_SCRIPT_NOT_FOUND` — required script not found
+- `E_SCRIPT_NOT_EXECUTABLE` — script is not executable (suggests `chmod +x`)
+- `E_PERSIST_FAILED` — failed to write persistence files
 
 ## development
 

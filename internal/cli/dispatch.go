@@ -120,8 +120,8 @@ func runInit(args []string, stdout, stderr io.Writer) error {
 }
 
 func runDoctor(args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	flagSet := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
 
 	// Handle help manually to return nil (exit 0)
 	for _, arg := range args {
@@ -131,9 +131,20 @@ func runDoctor(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	if err := fs.Parse(args); err != nil {
+	if err := flagSet.Parse(args); err != nil {
 		return errors.Wrap(errors.EUsage, "invalid flags", err)
 	}
 
-	return errors.New(errors.ENotImplemented, "agency doctor is not yet implemented")
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return errors.Wrap(errors.ENoRepo, "failed to get working directory", err)
+	}
+
+	// Create real implementations
+	cr := exec.NewRealRunner()
+	fsys := fs.NewRealFS()
+	ctx := context.Background()
+
+	return commands.Doctor(ctx, cr, fsys, cwd, stdout, stderr)
 }

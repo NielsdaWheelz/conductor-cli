@@ -138,14 +138,30 @@ func TestRun_InitNotInRepo(t *testing.T) {
 	}
 }
 
-func TestRun_DoctorNotImplemented(t *testing.T) {
+// TestRun_DoctorNotInRepo tests that doctor fails when not in a git repo.
+// Note: The actual doctor implementation is tested in internal/commands/doctor_test.go.
+// This test verifies the CLI wiring works.
+func TestRun_DoctorNotInRepo(t *testing.T) {
+	// Save and restore cwd
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get cwd: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	// Change to temp dir that is NOT a git repo
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+
 	var stdout, stderr bytes.Buffer
-	err := Run([]string{"doctor"}, &stdout, &stderr)
+	err = Run([]string{"doctor"}, &stdout, &stderr)
 
 	if err == nil {
-		t.Fatal("expected error")
+		t.Fatal("expected error when not in git repo")
 	}
-	if errors.GetCode(err) != errors.ENotImplemented {
-		t.Errorf("code = %q, want %q", errors.GetCode(err), errors.ENotImplemented)
+	if errors.GetCode(err) != errors.ENoRepo {
+		t.Errorf("code = %q, want %q", errors.GetCode(err), errors.ENoRepo)
 	}
 }

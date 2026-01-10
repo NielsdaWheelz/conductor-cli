@@ -22,6 +22,16 @@ const (
 	EAgencyJSONExists    Code = "E_AGENCY_JSON_EXISTS"
 	ERunnerNotConfigured Code = "E_RUNNER_NOT_CONFIGURED"
 	EStoreCorrupt        Code = "E_STORE_CORRUPT"
+
+	// Tool/prerequisite error codes
+	EGitNotInstalled     Code = "E_GIT_NOT_INSTALLED"
+	ETmuxNotInstalled    Code = "E_TMUX_NOT_INSTALLED"
+	EGhNotInstalled      Code = "E_GH_NOT_INSTALLED"
+	EGhNotAuthenticated  Code = "E_GH_NOT_AUTHENTICATED"
+	EScriptNotFound      Code = "E_SCRIPT_NOT_FOUND"
+	EScriptNotExecutable Code = "E_SCRIPT_NOT_EXECUTABLE"
+	EPersistFailed       Code = "E_PERSIST_FAILED"
+	EInternal            Code = "E_INTERNAL"
 )
 
 // AgencyError is the standard error type for agency errors.
