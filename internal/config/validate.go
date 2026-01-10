@@ -135,11 +135,66 @@ func isAgencyError(err error, target **errors.AgencyError) bool {
 }
 
 // LoadAndValidate is a convenience function that loads and validates agency.json.
-// This is the primary entry point for callers.
+// This is the primary entry point for callers that need full validation (e.g., doctor).
 func LoadAndValidate(filesystem fs.FS, repoRoot string) (AgencyConfig, error) {
 	cfg, err := LoadAgencyConfig(filesystem, repoRoot)
 	if err != nil {
 		return AgencyConfig{}, err
 	}
 	return ValidateAgencyConfig(cfg)
+}
+
+// ValidateForS1 validates the configuration for slice 1 requirements only.
+// Unlike ValidateAgencyConfig, this only requires scripts.setup (not verify/archive).
+// Returns the config with ResolvedRunnerCmd populated on success.
+// Returns E_INVALID_AGENCY_JSON for schema/required-field errors.
+// Returns E_RUNNER_NOT_CONFIGURED if runner cannot be resolved.
+func ValidateForS1(cfg AgencyConfig) (AgencyConfig, error) {
+	// Validate version
+	if cfg.Version != 1 {
+		return cfg, errors.New(errors.EInvalidAgencyJSON, "version must be 1")
+	}
+
+	// Validate required fields in defaults
+	if cfg.Defaults.ParentBranch == "" {
+		return cfg, errors.New(errors.EInvalidAgencyJSON, "missing required field defaults.parent_branch")
+	}
+	if cfg.Defaults.Runner == "" {
+		return cfg, errors.New(errors.EInvalidAgencyJSON, "missing required field defaults.runner")
+	}
+
+	// Validate scripts.setup only (S1 requirement)
+	if cfg.Scripts.Setup == "" {
+		return cfg, errors.New(errors.EInvalidAgencyJSON, "missing required field scripts.setup")
+	}
+
+	// Validate runners entries (if present)
+	for name, cmd := range cfg.Runners {
+		if cmd == "" {
+			return cfg, errors.New(errors.EInvalidAgencyJSON, "runners."+name+" must be a non-empty string")
+		}
+		if containsWhitespace(cmd) {
+			return cfg, errors.New(errors.EInvalidAgencyJSON, "runners."+name+" must be a single executable (no args); use a wrapper script")
+		}
+	}
+
+	// Resolve runner command
+	resolved, err := resolveRunner(cfg)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.ResolvedRunnerCmd = resolved
+
+	return cfg, nil
+}
+
+// LoadAndValidateForS1 is a convenience function that loads and validates agency.json
+// for slice 1 requirements only. This validates only scripts.setup (not verify/archive).
+// This is the primary entry point for S1 commands (e.g., agency run).
+func LoadAndValidateForS1(filesystem fs.FS, repoRoot string) (AgencyConfig, error) {
+	cfg, err := LoadAgencyConfig(filesystem, repoRoot)
+	if err != nil {
+		return AgencyConfig{}, err
+	}
+	return ValidateForS1(cfg)
 }
