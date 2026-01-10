@@ -18,8 +18,9 @@ slice 0 progress:
 slice 1 progress:
 - [x] PR-01: core utilities + errors + subprocess + atomic json
 - [x] PR-02: repo detection + safety gates + repo.json update
+- [x] PR-03: agency.json load + runner resolution for S1
 
-next: slice 1 PR-03 (agency.json load + runner resolution)
+next: slice 1 PR-04 (run pipeline orchestration)
 
 ## installation
 
@@ -189,7 +190,7 @@ agency/
 ├── internal/
 │   ├── cli/              # command dispatcher (stdlib flag)
 │   ├── commands/         # command implementations (init, doctor, etc.)
-│   ├── config/           # agency.json loading + validation
+│   ├── config/           # agency.json loading + validation (LoadAndValidate, ValidateForS1)
 │   ├── core/             # run id generation, slugify, branch naming, shell escaping
 │   ├── errors/           # stable error codes + AgencyError type
 │   ├── exec/             # CommandRunner interface + RunScript with timeout
