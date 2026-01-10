@@ -29,13 +29,13 @@ slice 1 progress:
 slice 2 progress:
 - [x] PR-00: repo lock helper
 - [x] PR-01: run discovery + parsing + broken run records
-- [ ] PR-02: run id resolution (exact + unique prefix)
+- [x] PR-02: run id resolution (exact + unique prefix)
 - [x] PR-03: derived status computation (pure)
 - [ ] PR-04: `agency ls` command
 - [ ] PR-05: `agency show` command
 - [ ] PR-06: transcript capture + events.jsonl
 
-next: slice 2 PR-02 (run id resolution)
+next: slice 2 PR-04 (`agency ls` command)
 
 ## installation
 
@@ -301,6 +301,7 @@ agency/
 │   ├── fs/               # FS interface + atomic write + WriteJSONAtomic
 │   ├── git/              # repo discovery + origin info + safety gates
 │   ├── identity/         # repo_key + repo_id derivation
+│   ├── ids/              # run id resolution (exact + unique prefix)
 │   ├── lock/             # repo-level locking for mutating commands
 │   ├── paths/            # XDG directory resolution
 │   ├── pipeline/         # run pipeline orchestrator (step execution, error handling)
