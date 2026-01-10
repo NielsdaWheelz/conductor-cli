@@ -160,6 +160,7 @@ rules for every PR:
   - `scripts/agency_setup.sh`
   - `scripts/agency_verify.sh`
   - `scripts/agency_archive.sh`
+- ensure template uses relative script paths under repo root (no absolute paths)
 - `.gitignore` behavior:
   - default append `.agency/` (create file if missing)
   - no duplicate entries
