@@ -19,6 +19,7 @@ const (
 	ENoRepo              Code = "E_NO_REPO"
 	ENoAgencyJSON        Code = "E_NO_AGENCY_JSON"
 	EInvalidAgencyJSON   Code = "E_INVALID_AGENCY_JSON"
+	EAgencyJSONExists    Code = "E_AGENCY_JSON_EXISTS"
 	ERunnerNotConfigured Code = "E_RUNNER_NOT_CONFIGURED"
 	EStoreCorrupt        Code = "E_STORE_CORRUPT"
 )
