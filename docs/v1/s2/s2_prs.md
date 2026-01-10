@@ -20,7 +20,7 @@ recommended merge strategy:
 shared types introduced in pr-01 (do not drift):
 - `store.Meta` (parsed meta.json; includes `flags.*` fields)
 - `store.RepoInfo` (repo_key, origin_url)
-- `store.RunRecord` (RepoID, RunID, Broken, Meta *Meta, Repo *RepoInfo, RunDir string, RepoRoot *string)
+- `store.RunRecord` (RepoID, RunID, Broken, Meta *Meta, Repo *RepoInfo, RunDir string)
 - `store.RepoIndex` + helper `PickRepoRoot(repoKey string, cwdRepoRoot *string) *string`
 
 ---
@@ -34,7 +34,7 @@ provide a single repo lock implementation used by all mutating commands in s2.
 - add `internal/lock/repo_lock.go`:
   - `type RepoLock struct { ... }`
   - `func (l RepoLock) Lock(repoID string) (func() error, error)` (returns unlock func)
-- lock path based on `${AGENCY_DATA_DIR}/repos/<repo_id>/lock`
+- lock path based on `${AGENCY_DATA_DIR}/repos/<repo_id>/.lock` (file, not directory)
 - best-effort, local-only (no network)
 
 ### acceptance
@@ -48,7 +48,7 @@ provide a single repo lock implementation used by all mutating commands in s2.
 ## pr-01: run discovery + parsing + “broken run” records
 
 ### goal
-implement filesystem-based run discovery and robust parsing for `meta.json` + best-effort join to `repo.json`, including “broken” runs and deterministic repo_root selection for display.
+implement filesystem-based run discovery and robust parsing for `meta.json` + best-effort join to `repo.json`, including “broken” runs.
 
 ### scope
 - scan: `${AGENCY_DATA_DIR}/repos/*/runs/*/meta.json`
@@ -59,13 +59,12 @@ implement filesystem-based run discovery and robust parsing for `meta.json` + be
   - `meta=nil`
 - load `repos/<repo_id>/repo.json` (best-effort). if missing/corrupt, set `repo_key=null`, `origin_url=null` without marking run broken.
 - load `${AGENCY_DATA_DIR}/repo_index.json` (best-effort)
-- implement `PickRepoRoot(repoKey, cwdRepoRoot)` per s2_spec preference order
-- compute `RepoRoot` for each RunRecord when repo_key is known (display-only; never affects discovery or resolution)
+- implement `PickRepoRoot(repoKey, cwdRepoRoot)` per s2_spec preference order (display-only; call from command layer)
 - do **not** implement status derivation or CLI output yet (only plumbing).
 
 ### files/packages
 - `internal/store/scan.go` (or similar)
-  - `type RunRecord struct { RepoID string; RunID string; Broken bool; Meta *Meta; Repo *RepoInfo /* nullable */; RunDir string; RepoRoot *string }`
+  - `type RunRecord struct { RepoID string; RunID string; Broken bool; Meta *Meta; Repo *RepoInfo /* nullable */; RunDir string }`
   - `func ScanAllRuns(dataDir string) ([]RunRecord, error)`
   - `func ScanRunsForRepo(dataDir, repoID string) ([]RunRecord, error)`
 - `internal/store/repo_index.go`
@@ -94,7 +93,7 @@ implement filesystem-based run discovery and robust parsing for `meta.json` + be
 allow all run-targeting commands to accept exact `run_id` or unique prefix, with deterministic errors.
 
 ### scope
-- implement resolver over a set of discovered `RunRecord`s:
+- implement resolver over a set of discovered candidates (no store coupling):
   - exact match wins
   - else prefix matches:
     - 0 => not found
@@ -105,14 +104,15 @@ allow all run-targeting commands to accept exact `run_id` or unique prefix, with
 ### files/packages
 - `internal/ids/resolve.go`
   - `type AmbiguousError struct { Prefix string; Candidates []string }`
-  - `func ResolveRun(input string, runs []store.RunRecord) (store.RunRecord, error)`
+  - `type RunRef struct { RunID string; RepoID string; Broken bool }`
+  - `func ResolveRunRef(input string, refs []RunRef) (RunRef, error)`
 - tests:
   - `internal/ids/resolve_test.go` (table-driven: 0/1/many, exact vs prefix)
 
 ### acceptance
 - given run ids `20260110-a3f2` and `20260110-a3ff`, resolving `20260110-a3f` returns `E_RUN_ID_AMBIGUOUS` with both candidates.
 - resolving `20260110-a3` returns the single match.
-- commands that require meta must refuse a resolved `RunRecord` where `Broken=true`.
+- commands that require meta must refuse a resolved `RunRef` where `Broken=true`.
 
 ### guardrails
 - no CLI wiring yet (pure library PR).
@@ -190,6 +190,7 @@ ship `agency ls` as a fast local-only listing command with default scope rules a
 - tests:
   - unit: json schema shape + stable fields (golden-ish)
   - integration-ish: temp `${DATA}` with multiple repos, verify scope rules by calling internal helpers (no compiled binary)
+  - command-layer tests call the handler directly with args (no exec)
 
 ### acceptance
 - running outside a git repo lists across repos by default (excluding archived).
@@ -219,7 +220,7 @@ ship rich inspection for a single run id, with deterministic id resolution and s
   - report exists/bytes/path
   - log paths for setup/verify/archive (even if missing)
   - repo identity join (repo_key/origin_url nullable)
-  - if resolved `RunRecord.Broken=true` and command requires meta (show), refuse with `E_RUN_BROKEN`
+  - if resolved `RunRef.Broken=true` and command requires meta (show), refuse with `E_RUN_BROKEN`
 
 ### files/packages
 - `cmd/agency/show.go`
@@ -255,6 +256,7 @@ implement deterministic tmux transcript capture, and minimal events.jsonl emissi
   - mutating mode: takes repo lock (from pr-00), emits cmd_start/cmd_end
   - if tmux session exists: capture full scrollback:
     - assume single window/pane; target `agency:<run_id>:0.0`
+    - assert s1 invariant: agency creates a single window/pane; if missing, warn and continue
     - `tmux capture-pane -p -S - -t agency:<run_id>:0.0`
   - strip ANSI escape codes after capture
   - rotate transcript: overwrite `transcript.txt`, best-effort move old to `transcript.prev.txt`
